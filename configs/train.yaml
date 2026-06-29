@@ -1,0 +1,28 @@
+project:
+  name: ThelerineVTON
+  version: 0.1.0
+
+dataset:
+  image_size: 256
+  batch_size: 4
+  num_workers: 4
+
+model:
+  base_channels: 64
+  cond_channels: 6
+
+training:
+  epochs: 100
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+
+paths:
+  dataset_root: data/
+  checkpoints: checkpoints/
+  samples: samples/
+
+logging:
+  tensorboard: true
+  save_every: 10
+
+seed: 42
