@@ -1,3 +1,12 @@
+
+## Author
+
+Keneilwe Mokoka
+
+## Current Status
+
+🚧 Active Development (Version 0.1)
+
 # ThelerineVTON
 
 The deep learning virtual try-on engine powering ThelerineAI.
@@ -30,10 +39,5 @@ tests/
 train.py
 inference.py
 
-## Current Status
 
-🚧 Active Development (Version 0.1)
 
-## Author
-
-Keneilwe Mokoka

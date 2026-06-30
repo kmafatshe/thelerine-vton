@@ -1,0 +1,30 @@
+# Core Deep Learning
+torch==2.2.2
+torchvision==0.17.2
+torchaudio==2.2.2
+
+# Numerical
+numpy==1.26.4
+scipy==1.13.1
+
+# Images
+opencv-python==4.11.0.86
+Pillow==11.3.0
+scikit-image==0.25.2
+
+# Utilities
+PyYAML==6.0.2
+tqdm==4.67.1
+matplotlib==3.10.6
+
+# Logging
+tensorboard==2.20.0
+
+# Perceptual loss
+lpips==0.1.4
+
+# Testing
+pytest==8.4.2
+
+# Formatting
+black==25.1.0
