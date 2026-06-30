@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 authors = [
-    {name = "Keneilwe Mokoka"}
+    { name = "Keneilwe Mokoka" }
 ]
 
 dependencies = [
@@ -23,12 +23,19 @@ dependencies = [
     "tensorboard==2.20.0",
     "scikit-image==0.25.2",
     "lpips==0.1.4",
+]
+
+[project.optional-dependencies]
+dev = [
     "pytest==8.4.2",
-    "black==25.1.0"
+    "black==25.1.0",
 ]
 
 [tool.setuptools]
-packages = ["datasets", "models", "training", "utils"]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+include = ["thelerine_vton*"]
 
 [build-system]
 requires = ["setuptools>=61"]

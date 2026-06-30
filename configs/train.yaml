@@ -1,28 +1,125 @@
-project:
-  name: ThelerineVTON
-  version: 0.1.0
+# ==========================================================
+# ThelerineVTON Training Configuration
+# ==========================================================
+
+experiment:
+
+  name: thelerine_vton_v2
+
+  output_dir: outputs/thelerine_vton_v2
+
+  seed: 42
+
+# ==========================================================
+# Dataset
+# ==========================================================
 
 dataset:
+
+  root: /path/to/dataset
+
+  train_manifest: /path/to/train_manifest.jsonl
+
+  val_manifest: /path/to/val_manifest.jsonl
+
   image_size: 256
+
+# ==========================================================
+# DataLoader
+# ==========================================================
+
+dataloader:
+
   batch_size: 4
+
+  shuffle: true
+
   num_workers: 4
 
-model:
-  base_channels: 64
-  cond_channels: 6
+  pin_memory: true
 
-training:
-  epochs: 100
-  learning_rate: 0.0001
+# ==========================================================
+# Model
+# ==========================================================
+
+model:
+
+  base_channels: 64
+
+# ==========================================================
+# Optimizer
+# ==========================================================
+
+optimizer:
+
+  name: adamw
+
+  learning_rate: 0.0002
+
   weight_decay: 0.00001
 
-paths:
-  dataset_root: data/
-  checkpoints: checkpoints/
-  samples: samples/
+# ==========================================================
+# Learning Rate Scheduler
+# ==========================================================
+
+scheduler:
+
+  name: cosine
+
+  min_lr: 0.000001
+
+# ==========================================================
+# Loss Weights
+# ==========================================================
+
+loss:
+
+  image_weight: 1.0
+
+  perceptual_weight: 0.3
+
+  edge_weight: 0.2
+
+  garment_weight: 2.0
+
+# ==========================================================
+# Training
+# ==========================================================
+
+training:
+
+  epochs: 100
+
+  mixed_precision: true
+
+  gradient_clip: 1.0
+
+# ==========================================================
+# Checkpoints
+# ==========================================================
+
+checkpoint:
+
+  save_every: 5
+
+# ==========================================================
+# Validation
+# ==========================================================
+
+validation:
+
+  enabled: true
+
+  every: 1
+
+# ==========================================================
+# Logging
+# ==========================================================
 
 logging:
-  tensorboard: true
-  save_every: 10
 
-seed: 42
+  tensorboard: true
+
+  save_images_every: 1
+
+  log_every: 20
