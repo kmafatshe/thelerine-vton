@@ -45,6 +45,67 @@ class Trainer:
             enabled=self.use_amp
         )
 
+    # --------------------------------------------------------
+
+    def _move_batch(self, batch):
+
+        person = batch.person.to(
+            self.device,
+            non_blocking=True,
+        )
+
+        garment = batch.garment.to(
+            self.device,
+            non_blocking=True,
+        )
+
+        condition = batch.condition.to(
+            self.device,
+            non_blocking=True,
+        )
+
+        target = batch.target.to(
+            self.device,
+            non_blocking=True,
+        )
+
+        garment_mask = batch.garment_mask.to(
+            self.device,
+            non_blocking=True,
+        )
+
+        return person, garment, condition, target, garment_mask
+
+    # --------------------------------------------------------
+
+    def _forward(self, batch):
+
+        (
+            person,
+            garment,
+            condition,
+            target,
+            garment_mask,
+        ) = self._move_batch(batch)
+
+        prediction = self.model(
+            person,
+            garment,
+            condition,
+        )
+
+        losses = self.loss_fn(
+            prediction.image,
+            target,
+            garment_mask,
+        )
+
+        return losses
+
+    # --------------------------------------------------------
+    # Training
+    # --------------------------------------------------------
+
     def train_epoch(self) -> Dict[str, float]:
 
         self.model.train()
@@ -60,25 +121,10 @@ class Trainer:
         progress = tqdm(
             self.train_loader,
             leave=False,
+            desc="Train",
         )
 
         for batch in progress:
-
-            person = batch.person.to(self.device)
-
-            garment = batch.garment.to(self.device)
-
-            condition = batch.condition.to(self.device)
-
-            target = batch.target.to(self.device)
-
-            garment_mask = (
-
-                batch.garment_mask
-                .unsqueeze(1)
-                .to(self.device)
-
-            )
 
             self.optimizer.zero_grad(
                 set_to_none=True
@@ -87,26 +133,7 @@ class Trainer:
             with autocast(
                 enabled=self.use_amp
             ):
-
-                prediction = self.model(
-
-                    person,
-
-                    garment,
-
-                    condition,
-
-                )
-
-                losses = self.loss_fn(
-
-                    prediction.image,
-
-                    target,
-
-                    garment_mask,
-
-                )
+                losses = self._forward(batch)
 
             self.scaler.scale(
                 losses["total"]
@@ -117,45 +144,37 @@ class Trainer:
             )
 
             torch.nn.utils.clip_grad_norm_(
-
                 self.model.parameters(),
-
                 self.grad_clip,
-
             )
 
             self.scaler.step(
                 self.optimizer
             )
-
             self.scaler.update()
 
             for key in running:
-
                 running[key] += losses[key].item()
 
             progress.set_postfix(
-
                 total=f"{losses['total'].item():.4f}",
-
                 image=f"{losses['image'].item():.4f}",
-
             )
 
         n = len(self.train_loader)
 
         if self.scheduler is not None:
-
             self.scheduler.step()
 
         return {
-
             key: value / n
-
             for key, value in running.items()
-
         }
-    
+
+    # --------------------------------------------------------
+    # Validation
+    # --------------------------------------------------------
+
     def validate_epoch(self):
 
         if self.val_loader is None:
@@ -181,52 +200,22 @@ class Trainer:
 
             for batch in progress:
 
-                person = batch.person.to(self.device)
-
-                garment = batch.garment.to(self.device)
-
-                condition = batch.condition.to(self.device)
-
-                target = batch.target.to(self.device)
-
-                garment_mask = (
-                    batch.garment_mask
-                    .unsqueeze(1)
-                    .to(self.device)
-                )
-
-                with autocast(enabled=self.use_amp):
-
-                    prediction = self.model(
-
-                        person,
-
-                        garment,
-
-                        condition,
-
-                    )
-
-                    losses = self.loss_fn(
-
-                        prediction.image,
-
-                        target,
-
-                        garment_mask,
-
-                    )
+                with autocast(
+                    enabled=self.use_amp
+                ):
+                    losses = self._forward(batch)
 
                 for key in running:
-
                     running[key] += losses[key].item()
+
+                progress.set_postfix(
+                    total=f"{losses['total'].item():.4f}",
+                    image=f"{losses['image'].item():.4f}",
+                )
 
         n = len(self.val_loader)
 
         return {
-
             key: value / n
-
             for key, value in running.items()
-
         }

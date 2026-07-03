@@ -1,33 +1,29 @@
 """
-Triplet dataset for ThelerineVTON.
+datasets/triplet_dataset.py
 
-Reads samples directly from manifest.jsonl.
+PyTorch dataset for ThelerineVTON V2.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
-import torch
 from PIL import Image
+
+import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
+from torchvision import transforms
 
-from thelerine_vton.datasets.manifest import (
-    ConditionAsset,
-    GarmentAsset,
-    ImageAsset,
-    ManifestRecord,
-    SegmentationAsset,
+from .manifest import load_manifest
+from .sample import Sample
+from thelerine_vton.preprocessing.agnostic import (
+    build_clothing_mask,
+    make_agnostic,
 )
-
-from thelerine_vton.datasets.sample import Sample
-
-from thelerine_vton.datasets.transforms import (
-    ConditionTransform,
-    ImageTransform,
-    SegmentationTransform,
+from thelerine_vton.preprocessing.garment_alignment import (
+    align_garment_to_body,
 )
 
 
@@ -35,219 +31,169 @@ class TripletDataset(Dataset):
 
     def __init__(
         self,
-        dataset_root: str | Path,
-        manifest_file: str | Path,
-        image_size: int = 256,
+        dataset_root,
+        manifest_path=None,
+        image_size=256,
     ):
 
         self.root = Path(dataset_root)
 
-        self.records = []
+        if manifest_path is None:
+            manifest_path = self.root / "manifest.jsonl"
 
-        with open(manifest_file, "r") as f:
+        self.manifest = load_manifest(manifest_path)
+        self.image_size = image_size
 
-            for line in f:
+        self.image_transform = transforms.Compose([
+            transforms.Resize(
+                (image_size, image_size),
+                interpolation=Image.BILINEAR,
+            ),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=(0.5, 0.5, 0.5),
+                std=(0.5, 0.5, 0.5),
+            ),
+        ])
 
-                d = json.loads(line)
-
-                record = ManifestRecord(
-
-                    identity=d["identity"],
-
-                    split=d["split"],
-
-                    source=d["source"],
-
-                    target=d["target"],
-
-                    person=ImageAsset(**d["person"]),
-
-                    target_person=ImageAsset(
-                        **d["target_person"]
-                    ),
-
-                    condition=ConditionAsset(
-                        **d["condition"]
-                    ),
-
-                    source_segmentation=SegmentationAsset(
-                        **d["source_segmentation"]
-                    ),
-
-                    target_segmentation=SegmentationAsset(
-                        **d["target_segmentation"]
-                    ),
-
-                    garments=[
-                        GarmentAsset(**g)
-                        for g in d["garments"]
-                    ],
-
-                )
-
-                self.records.append(record)
-
-        self.image_tf = ImageTransform(image_size)
-
-        self.cond_tf = ConditionTransform(image_size)
-
-        self.seg_tf = SegmentationTransform(image_size)
+    # --------------------------------------------------------
 
     def __len__(self):
+        return len(self.manifest)
 
-        return len(self.records)
+    # --------------------------------------------------------
 
-    def __getitem__(self, idx):
+    def _check_exists(self, path: Path):
 
-        record = self.records[idx]
+        if not path.exists():
+            raise FileNotFoundError(path)
 
-        # -------------------------------------------------
-        # Load images
-        # -------------------------------------------------
+    # --------------------------------------------------------
 
-        person = Image.open(
-            self.root / record.person.path
-        ).convert("RGB")
+    def _load_image(self, relative_path):
 
-        target = Image.open(
-            self.root / record.target_person.path
-        ).convert("RGB")
+        path = self.root / relative_path
+        self._check_exists(path)
 
-        garment = Image.open(
-            self.root / record.garments[0].path
-        ).convert("RGB")
+        image = Image.open(path).convert("RGB")
+        return self.image_transform(image)
 
-        # -------------------------------------------------
-        # Load conditioning
-        # -------------------------------------------------
+    # --------------------------------------------------------
 
-        cond = np.load(
-            self.root / record.condition.path
-        )
+    def _resize_tensor(
+        self,
+        tensor,
+        mode="bilinear",
+    ):
 
-        source_seg = np.load(
-            self.root /
-            record.source_segmentation.path
-        )
+        tensor = tensor.unsqueeze(0)
 
-        target_seg = np.load(
-            self.root /
-            record.target_segmentation.path
-        )
-
-        # -------------------------------------------------
-        # Convert to tensors
-        # -------------------------------------------------
-
-        person = self.image_tf(person)
-
-        target = self.image_tf(target)
-
-        garment = self.image_tf(garment)
-
-        cond = self.cond_tf(
-            torch.from_numpy(cond)
-        )
-
-        source_seg = self.seg_tf(
-            torch.from_numpy(source_seg)
-        )
-
-        target_seg = self.seg_tf(
-            torch.from_numpy(target_seg)
-        )
-
-        # -------------------------------------------------
-        # Sanity check
-        # -------------------------------------------------
-
-        if cond.shape[0] != 6:
-
-            raise ValueError(
-
-                f"Expected DensePose with 6 channels, "
-                f"got {cond.shape}"
-
+        if mode == "nearest":
+            tensor = F.interpolate(
+                tensor,
+                size=(self.image_size, self.image_size),
+                mode="nearest",
+            )
+        else:
+            tensor = F.interpolate(
+                tensor,
+                size=(self.image_size, self.image_size),
+                mode="bilinear",
+                align_corners=False,
             )
 
-        # -------------------------------------------------
-        # Binary garment masks
-        # -------------------------------------------------
+        return tensor.squeeze(0)
 
-        source_garment_mask = extract_garment_mask(
-            source_seg
+    # --------------------------------------------------------
+
+    def _load_numpy(
+        self,
+        relative_path,
+        is_segmentation=False,
+    ):
+
+        path = self.root / relative_path
+        self._check_exists(path)
+
+        array = np.load(path)
+
+        # -----------------------------------------
+        # Convert to CHW
+        # -----------------------------------------
+
+        if array.ndim == 2:
+            # H,W -> 1,H,W
+            array = array[None]
+
+        elif array.ndim == 3:
+            # If last dim looks like channel count, assume HWC -> CHW
+            if array.shape[-1] <= 10:
+                array = np.transpose(array, (2, 0, 1))
+            # otherwise assume already CHW
+
+        else:
+            raise ValueError(
+                f"Unsupported array shape {array.shape}"
+            )
+
+        tensor = torch.from_numpy(array).float()
+
+        if is_segmentation:
+            tensor = self._resize_tensor(
+                tensor,
+                mode="nearest",
+            )
+        else:
+            tensor = self._resize_tensor(
+                tensor,
+                mode="bilinear",
+            )
+
+        return tensor.contiguous()
+
+    # --------------------------------------------------------
+
+    def __getitem__(self, index):
+
+        sample = self.manifest[index]
+
+        # -----------------------------------------
+        # Raw inputs
+        # -----------------------------------------
+
+        target = self._load_image(sample.person)     # original person image
+        garment = self._load_image(sample.garment)
+        cond = self._load_numpy(
+            sample.cond,
+            is_segmentation=False,
+        )
+        seg = self._load_numpy(
+            sample.seg,
+            is_segmentation=True,
         )
 
-        target_garment_mask = extract_garment_mask(
-            target_seg
-        )
+        # -----------------------------------------
+        # Derived training inputs
+        # -----------------------------------------
 
-        # -------------------------------------------------
-        # Build condition tensor
-        # -------------------------------------------------
+        garment_mask = build_clothing_mask(seg)      # [1,H,W]
+        person = make_agnostic(target, seg)          # agnostic person
+        garment = align_garment_to_body(
+            garment.unsqueeze(0),
+            seg.unsqueeze(0),
+            keep_background=True,
+        ).squeeze(0)
 
+        # condition = cond + garment_mask
         condition = torch.cat(
-
-            (
-
-                cond,
-
-                source_garment_mask.unsqueeze(0),
-
-            ),
-
+            [cond, garment_mask],
             dim=0,
-
-        )
-
-        # -------------------------------------------------
-        # Return sample
-        # -------------------------------------------------
+        ).contiguous()
 
         return Sample(
-
-            person=person,
-
-            garment=garment,
-
+            person=person.contiguous(),
+            garment=garment.contiguous(),
             condition=condition,
-
-            target=target,
-
-            garment_mask=target_garment_mask,
-
+            target=target.contiguous(),
+            garment_mask=garment_mask.contiguous(),
         )
-
-
-def extract_garment_mask(
-    seg_map: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Extract a binary garment mask from a CIHP segmentation map.
-
-    CIHP clothing classes:
-
-        5  Upper clothes
-        6  Dress
-        7  Coat
-        9  Pants
-        10 Jumpsuit
-    """
-
-    garment_classes = torch.tensor(
-
-        [5, 6, 7, 9, 10],
-
-        device=seg_map.device,
-
-    )
-
-    mask = (
-
-        seg_map.unsqueeze(0)
-
-        == garment_classes[:, None, None]
-
-    )
-
-    return mask.any(dim=0).float()
