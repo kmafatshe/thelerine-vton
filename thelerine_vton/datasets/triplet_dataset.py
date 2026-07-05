@@ -1,7 +1,8 @@
+
 """
 datasets/triplet_dataset.py
 
-PyTorch dataset for ThelerineVTON V2.
+PyTorch dataset for ThelerineVTON V2 using swap-manifest training pairs.
 """
 
 from __future__ import annotations
@@ -22,9 +23,6 @@ from thelerine_vton.preprocessing.agnostic import (
     build_clothing_mask,
     make_agnostic,
 )
-from thelerine_vton.preprocessing.garment_alignment import (
-    align_garment_to_body,
-)
 
 
 class TripletDataset(Dataset):
@@ -39,7 +37,7 @@ class TripletDataset(Dataset):
         self.root = Path(dataset_root)
 
         if manifest_path is None:
-            manifest_path = self.root / "manifest.jsonl"
+            manifest_path = self.root / "swap_manifest.jsonl"
 
         self.manifest = load_manifest(manifest_path)
         self.image_size = image_size
@@ -117,19 +115,12 @@ class TripletDataset(Dataset):
 
         array = np.load(path)
 
-        # -----------------------------------------
-        # Convert to CHW
-        # -----------------------------------------
-
         if array.ndim == 2:
-            # H,W -> 1,H,W
-            array = array[None]
+            array = array[None]  # H,W -> 1,H,W
 
         elif array.ndim == 3:
-            # If last dim looks like channel count, assume HWC -> CHW
             if array.shape[-1] <= 10:
                 array = np.transpose(array, (2, 0, 1))
-            # otherwise assume already CHW
 
         else:
             raise ValueError(
@@ -153,38 +144,131 @@ class TripletDataset(Dataset):
 
     # --------------------------------------------------------
 
+    def _normalize_condition(self, cond: torch.Tensor) -> torch.Tensor:
+        cond = cond.float()
+
+        if cond.max() > 2.0:
+            cond = cond / 255.0
+
+        return cond
+
+    # --------------------------------------------------------
+
+    def _crop_garment_foreground(
+        self,
+        img_tensor: torch.Tensor,
+        threshold: float = -0.95,
+        margin: int = 4,
+    ) -> torch.Tensor:
+        """
+        Crop away large black background around garment.
+
+        img_tensor: [3,H,W] in [-1,1]
+        threshold: pixels above this are considered foreground.
+                   Since padded/black background is near -1, this works
+                   for your extracted garment images.
+        """
+        # foreground if any channel is above threshold
+        fg = (img_tensor > threshold).any(dim=0)   # [H,W]
+
+        if fg.sum() == 0:
+            return img_tensor
+
+        ys, xs = torch.where(fg)
+        y0 = max(0, ys.min().item() - margin)
+        y1 = min(img_tensor.shape[1], ys.max().item() + 1 + margin)
+        x0 = max(0, xs.min().item() - margin)
+        x1 = min(img_tensor.shape[2], xs.max().item() + 1 + margin)
+
+        cropped = img_tensor[:, y0:y1, x0:x1]
+        return cropped.contiguous()
+
+    # --------------------------------------------------------
+
+    def _resize_garment_keep_aspect(
+        self,
+        img_tensor: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Crop garment foreground, then resize to fit inside a square canvas
+        while preserving aspect ratio.
+
+        Input:
+            img_tensor: [3,H,W] in [-1,1]
+
+        Output:
+            [3,image_size,image_size] in [-1,1]
+        """
+        img_tensor = self._crop_garment_foreground(img_tensor)
+
+        _, h, w = img_tensor.shape
+        target_size = self.image_size
+
+        if h == target_size and w == target_size:
+            return img_tensor
+
+        scale = target_size / float(max(h, w))
+        new_h = max(1, int(round(h * scale)))
+        new_w = max(1, int(round(w * scale)))
+
+        img = img_tensor.unsqueeze(0)
+        img = F.interpolate(
+            img,
+            size=(new_h, new_w),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)
+
+        pad_h = target_size - new_h
+        pad_w = target_size - new_w
+
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+
+        img = F.pad(
+            img,
+            (pad_left, pad_right, pad_top, pad_bottom),
+            mode="constant",
+            value=-1.0,
+        )
+
+        return img.contiguous()
+
+    # --------------------------------------------------------
+
     def __getitem__(self, index):
 
         sample = self.manifest[index]
 
-        # -----------------------------------------
-        # Raw inputs
-        # -----------------------------------------
+        source = self._load_image(sample.source_person)
+        target = self._load_image(sample.target_person)
 
-        target = self._load_image(sample.person)     # original person image
-        garment = self._load_image(sample.garment)
+        garment_raw = self._load_image(sample.garment)
+        garment = self._resize_garment_keep_aspect(garment_raw)
+
         cond = self._load_numpy(
-            sample.cond,
+            sample.source_cond,
             is_segmentation=False,
         )
+        cond = self._normalize_condition(cond)
+
         seg = self._load_numpy(
-            sample.seg,
+            sample.source_seg,
             is_segmentation=True,
         )
 
-        # -----------------------------------------
-        # Derived training inputs
-        # -----------------------------------------
+        garment_mask = build_clothing_mask(seg)
 
-        garment_mask = build_clothing_mask(seg)      # [1,H,W]
-        person = make_agnostic(target, seg)          # agnostic person
-        garment = align_garment_to_body(
-            garment.unsqueeze(0),
+        if garment_mask.ndim == 4:
+            garment_mask = garment_mask.squeeze(0)
+
+        person = make_agnostic(
+            source.unsqueeze(0),
             seg.unsqueeze(0),
-            keep_background=True,
         ).squeeze(0)
 
-        # condition = cond + garment_mask
         condition = torch.cat(
             [cond, garment_mask],
             dim=0,

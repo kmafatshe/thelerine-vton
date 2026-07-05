@@ -9,6 +9,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
 from thelerine_vton.datasets.triplet_dataset import TripletDataset
+from thelerine_vton.datasets.sample import collate_samples
 from thelerine_vton.models.vton_generator import VTONGenerator
 from thelerine_vton.training.callbacks import CallbackManager
 from thelerine_vton.training.losses import TotalLoss
@@ -63,6 +64,7 @@ def main():
         shuffle=True,
         num_workers=config["dataloader"]["num_workers"],
         pin_memory=config["dataloader"]["pin_memory"],
+        collate_fn=collate_samples,
     )
 
     val_loader = DataLoader(
@@ -71,6 +73,7 @@ def main():
         shuffle=False,
         num_workers=config["dataloader"]["num_workers"],
         pin_memory=config["dataloader"]["pin_memory"],
+        collate_fn=collate_samples,
     )
 
     # -----------------------------------------------------

@@ -4,9 +4,9 @@
 
 experiment:
 
-  name: thelerine_vton_v2
+  name: thelerine_vton_v2_swap
 
-  output_dir: outputs/thelerine_vton_v2
+  output_dir: outputs/thelerine_vton_v2_swap
 
   seed: 42
 
@@ -16,11 +16,11 @@ experiment:
 
 dataset:
 
-  root: /path/to/dataset
+  root: /content/drive/MyDrive/thelerineAI/Itekanye1.1_TripletDataset
 
-  train_manifest: /path/to/train_manifest.jsonl
+  train_manifest: /content/drive/MyDrive/thelerineAI/Itekanye1.1_TripletDataset/swap_manifest.jsonl
 
-  val_manifest: /path/to/val_manifest.jsonl
+  val_manifest: /content/drive/MyDrive/thelerineAI/Itekanye1.1_TripletDataset/swap_manifest.jsonl
 
   image_size: 256
 
@@ -30,11 +30,11 @@ dataset:
 
 dataloader:
 
-  batch_size: 4
+  batch_size: 1
 
   shuffle: true
 
-  num_workers: 4
+  num_workers: 0
 
   pin_memory: true
 
@@ -76,7 +76,7 @@ loss:
 
   image_weight: 1.0
 
-  perceptual_weight: 0.3
+  perceptual_weight: 0.0
 
   edge_weight: 0.2
 
@@ -88,7 +88,7 @@ loss:
 
 training:
 
-  epochs: 100
+  epochs: 10
 
   mixed_precision: true
 
