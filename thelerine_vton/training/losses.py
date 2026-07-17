@@ -1,3 +1,4 @@
+
 """
 Loss functions for ThelerineVTON.
 """
@@ -8,6 +9,7 @@ import lpips
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 class ImageLoss(nn.Module):
     """
@@ -23,20 +25,17 @@ class ImageLoss(nn.Module):
             prediction,
             target,
         )
-    
+
+
 class PerceptualLoss(nn.Module):
     """
     LPIPS perceptual similarity loss.
     """
 
     def __init__(self):
-
         super().__init__()
 
-        self.loss = lpips.LPIPS(
-            net="vgg"
-        )
-
+        self.loss = lpips.LPIPS(net="vgg")
         self.loss.eval()
 
         for p in self.loss.parameters():
@@ -47,10 +46,14 @@ class PerceptualLoss(nn.Module):
         prediction,
         target,
     ):
+        # make sure LPIPS module is on the same device as inputs
+        self.loss = self.loss.to(prediction.device)
+
         return self.loss(
             prediction,
             target,
         ).mean()
+
 
 class EdgeLoss(nn.Module):
     """
@@ -58,11 +61,9 @@ class EdgeLoss(nn.Module):
     """
 
     def gradient_x(self, img):
-
         return img[:, :, :, 1:] - img[:, :, :, :-1]
 
     def gradient_y(self, img):
-
         return img[:, :, 1:, :] - img[:, :, :-1, :]
 
     def forward(
@@ -70,7 +71,6 @@ class EdgeLoss(nn.Module):
         prediction,
         target,
     ):
-
         loss_x = F.l1_loss(
             self.gradient_x(prediction),
             self.gradient_x(target),
@@ -81,8 +81,9 @@ class EdgeLoss(nn.Module):
             self.gradient_y(target),
         )
 
-        return loss_x + loss_y    
-    
+        return loss_x + loss_y
+
+
 class GarmentConsistencyLoss(nn.Module):
     """
     Computes loss only inside the clothing region.
@@ -94,7 +95,6 @@ class GarmentConsistencyLoss(nn.Module):
         target,
         garment_mask,
     ):
-
         mask = garment_mask.float()
 
         if mask.ndim == 3:
@@ -117,58 +117,41 @@ class GarmentConsistencyLoss(nn.Module):
             mask.sum() + 1e-6
         )
 
+
 class TotalLoss(nn.Module):
 
     def __init__(
-
         self,
-
         image_weight=1.0,
-
         perceptual_weight=0.3,
-
         edge_weight=0.2,
-
         garment_weight=2.0,
-
     ):
-
         super().__init__()
 
-        self.image = ImageLoss()
-
-        self.perceptual = PerceptualLoss()
-
-        self.edge = EdgeLoss()
-
-        self.garment = GarmentConsistencyLoss()
-
         self.w_image = image_weight
-
         self.w_perc = perceptual_weight
-
         self.w_edge = edge_weight
-
         self.w_garment = garment_weight
 
-    def forward(
+        self.image = ImageLoss()
+        self.edge = EdgeLoss()
+        self.garment = GarmentConsistencyLoss()
 
-        self,
-
-        prediction,
-
-        target,
-
-        garment_mask,
-
-    ):
-
-        image_loss = self.image(
-            prediction,
-            target,
+        # only instantiate LPIPS if we actually plan to use it
+        self.perceptual = (
+            PerceptualLoss()
+            if self.w_perc > 0
+            else None
         )
 
-        perceptual_loss = self.perceptual(
+    def forward(
+        self,
+        prediction,
+        target,
+        garment_mask,
+    ):
+        image_loss = self.image(
             prediction,
             target,
         )
@@ -184,30 +167,27 @@ class TotalLoss(nn.Module):
             garment_mask,
         )
 
+        if self.perceptual is not None:
+            perceptual_loss = self.perceptual(
+                prediction,
+                target,
+            )
+        else:
+            perceptual_loss = prediction.new_tensor(0.0)
+
         total = (
-
             self.w_image * image_loss
-
             + self.w_perc * perceptual_loss
-
             + self.w_edge * edge_loss
-
             + self.w_garment * garment_loss
-
         )
 
         losses = {
-
             "total": total,
-
             "image": image_loss,
-
             "perceptual": perceptual_loss,
-
             "edge": edge_loss,
-
             "garment": garment_loss,
-
         }
 
-        return losses        
+        return losses

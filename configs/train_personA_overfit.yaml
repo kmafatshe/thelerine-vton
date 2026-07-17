@@ -1,0 +1,43 @@
+experiment:
+  name: thelerine_vton_personA_overfit
+  output_dir: /content/drive/MyDrive/thelerineAI/checkpoints/thelerine_vton_personA_overfit
+  seed: 42
+dataset:
+  root: /content/drive/MyDrive/thelerineAI/Itekanye1.1_TripletDataset
+  train_manifest: /content/drive/MyDrive/thelerineAI/Itekanye1.1_TripletDataset/personA_dress_swap_manifest_10.jsonl
+  val_manifest: /content/drive/MyDrive/thelerineAI/Itekanye1.1_TripletDataset/personA_dress_swap_manifest_10.jsonl
+  image_size: 256
+dataloader:
+  batch_size: 1
+  shuffle: true
+  num_workers: 0
+  pin_memory: true
+model:
+  base_channels: 64
+optimizer:
+  name: adamw
+  learning_rate: 0.0005
+  weight_decay: 1.0e-05
+scheduler:
+  name: cosine
+  min_lr: 1.0e-06
+loss:
+  image_weight: 1.0
+  perceptual_weight: 0.0
+  edge_weight: 0.3
+  garment_weight: 4.0
+training:
+  epochs: 500
+  mixed_precision: false
+  gradient_clip: 1.0
+checkpoint:
+  save_every: 5
+validation:
+  enabled: false
+  every: 1
+logging:
+  tensorboard: true
+  save_images_every: 5
+  log_every: 1
+pretrained:
+  checkpoint: /content/drive/MyDrive/thelerineAI/checkpoints/thelerine_vton_v2_swap/checkpoints/best.pt

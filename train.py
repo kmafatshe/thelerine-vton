@@ -16,7 +16,8 @@ from thelerine_vton.training.losses import TotalLoss
 from thelerine_vton.training.trainer import Trainer
 from thelerine_vton.training.scheduler import build_scheduler
 from thelerine_vton.utils.config import load_config
-from thelerine_vton.utils.seed import set_seed
+from pathlib import Path
+from thelerine_vton.utils.seed import seed_everything
 
 
 def get_device():
@@ -36,9 +37,9 @@ def main():
     # -----------------------------------------------------
     # Configuration
     # -----------------------------------------------------
-    config = load_config("configs/train.yaml")
+    config = load_config("configs/train_personA_overfit.yaml")
 
-    set_seed(config["experiment"]["seed"])
+    seed_everything(config["experiment"]["seed"])
 
     device = get_device()
     print(f"\nUsing device: {device}\n")
@@ -102,6 +103,32 @@ def main():
         weight_decay=config["optimizer"]["weight_decay"],
     )
 
+
+    # -----------------------------------------------------
+    # Resume / Fine-tune
+    # -----------------------------------------------------
+    output_dir = Path(config["experiment"]["output_dir"])
+    resume_checkpoint = output_dir / "checkpoints" / "latest.pt"
+    pretrained_checkpoint = Path(
+        config.get("pretrained", {}).get("checkpoint", "")
+    ) if config.get("pretrained") else None
+
+    start_epoch = 1
+
+    if resume_checkpoint.exists():
+        print(f"\nResuming from checkpoint: {resume_checkpoint}")
+        checkpoint = torch.load(resume_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        print(f"Loaded checkpoint from epoch {checkpoint['epoch']} with loss {checkpoint['loss']:.4f}")
+
+    elif pretrained_checkpoint and pretrained_checkpoint.exists():
+        print(f"\nInitializing from pretrained checkpoint: {pretrained_checkpoint}")
+        checkpoint = torch.load(pretrained_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+        print("Starting fine-tuning from epoch 1.")
+
     # -----------------------------------------------------
     # Scheduler
     # -----------------------------------------------------
@@ -138,7 +165,7 @@ def main():
     # -----------------------------------------------------
     epochs = config["training"]["epochs"]
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         print(f"\nEpoch {epoch}/{epochs}")
 
         train_losses = trainer.train_epoch()
@@ -146,7 +173,10 @@ def main():
 
         print(f"Learning Rate: {current_lr:.8f}")
 
-        val_losses = trainer.validate_epoch()
+        if config["validation"]["enabled"]:
+            val_losses = trainer.validate_epoch()
+        else:
+            val_losses = None
 
         callbacks.log_losses(
             epoch,
