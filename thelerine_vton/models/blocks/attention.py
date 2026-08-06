@@ -77,46 +77,51 @@ class MultiHeadSelfAttention(nn.Module):
         k = self.k_proj(x)
         v = self.v_proj(x)
 
-        # -------------------------
-        # Split into heads
-        # -------------------------
+        if N > 4096:
+            # Avoid global self-attention on very large feature maps.
+            # This prevents OOM on 256x256 / 128x128 fusion features.
+            out = self.out_proj(x)
+        else:
+            # -------------------------
+            # Split into heads
+            # -------------------------
 
-        q = q.view(
-            B,
-            self.num_heads,
-            self.head_dim,
-            N
-        ).permute(0,1,3,2)
+            q = q.view(
+                B,
+                self.num_heads,
+                self.head_dim,
+                N
+            ).permute(0,1,3,2)
 
-        k = k.view(
-            B,
-            self.num_heads,
-            self.head_dim,
-            N
-        ).permute(0,1,3,2)
+            k = k.view(
+                B,
+                self.num_heads,
+                self.head_dim,
+                N
+            ).permute(0,1,3,2)
 
-        v = v.view(
-            B,
-            self.num_heads,
-            self.head_dim,
-            N
-        ).permute(0,1,3,2)
+            v = v.view(
+                B,
+                self.num_heads,
+                self.head_dim,
+                N
+            ).permute(0,1,3,2)
 
-        # -------------------------
-        # Attention
-        # -------------------------
+            # -------------------------
+            # Attention
+            # -------------------------
 
-        scores = torch.matmul(
-            q,
-            k.transpose(-2,-1)
-        ) * self.scale
+            scores = torch.matmul(
+                q,
+                k.transpose(-2,-1)
+            ) * self.scale
 
-        attention = scores.softmax(dim=-1)
+            attention = scores.softmax(dim=-1)
 
-        out = torch.matmul(
-            attention,
-            v
-        )
+            out = torch.matmul(
+                attention,
+                v
+            )
 
         # -------------------------
         # Merge heads
