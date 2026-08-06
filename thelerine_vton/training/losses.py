@@ -1,13 +1,19 @@
 """
-Loss functions for ThelerineVTON.
+Loss functions for TheleriniVTON.
 """
 
 from __future__ import annotations
 
-import lpips
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+try:
+    import lpips
+    LPIPS_AVAILABLE = True
+except ModuleNotFoundError:
+    lpips = None
+    LPIPS_AVAILABLE = False
 
 class ImageLoss(nn.Module):
     """
@@ -27,30 +33,39 @@ class ImageLoss(nn.Module):
 class PerceptualLoss(nn.Module):
     """
     LPIPS perceptual similarity loss.
+
+    Falls back to L1 if `lpips` is unavailable.
     """
 
     def __init__(self):
 
         super().__init__()
 
-        self.loss = lpips.LPIPS(
-            net="vgg"
-        )
-
-        self.loss.eval()
-
-        for p in self.loss.parameters():
-            p.requires_grad = False
+        if LPIPS_AVAILABLE:
+            self.loss = lpips.LPIPS(
+                net="vgg"
+            )
+            self.loss.eval()
+            for p in self.loss.parameters():
+                p.requires_grad = False
+        else:
+            self.loss = None
 
     def forward(
         self,
         prediction,
         target,
     ):
-        return self.loss(
+        if self.loss is not None:
+            return self.loss(
+                prediction,
+                target,
+            ).mean()
+
+        return torch.nn.functional.l1_loss(
             prediction,
             target,
-        ).mean()
+        )
 
 class EdgeLoss(nn.Module):
     """
