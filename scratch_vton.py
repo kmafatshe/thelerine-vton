@@ -355,7 +355,7 @@ def _foreground_mask_from_garment(garment_np: np.ndarray) -> np.ndarray:
 
 def _resize_image_np(image_np: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     image = Image.fromarray((image_np * 255).astype(np.uint8))
-    resized = np.array(image.resize(size, resample=Image.BILINEAR)).astype(np.float32) / 255.0
+    resized = np.array(image.resize(size, resample=Image.LANCZOS)).astype(np.float32) / 255.0
     return resized
 
 
@@ -397,9 +397,7 @@ def overlay_person_garment(
         clothing_mask = build_clothing_mask(seg_tensor).squeeze(0).squeeze(0).bool().cpu().numpy()
 
         if clothing_mask.sum() > 0:
-            # Remove the original dress from the person image.
             removed = person_np.copy()
-            removed[clothing_mask] = 0.5
 
             # Fit the green dress to the clothing bbox from segmentation.
             gy1, gx1, gy2, gx2 = _bbox_from_mask(garment_mask)
@@ -410,47 +408,33 @@ def overlay_person_garment(
 
                 total_height = cy2 - cy1
                 total_width = cx2 - cx1
-                height_expand_top = int(total_height * 0.15)
-                height_expand_bottom = int(total_height * 0.45)
-                width_expand = int(total_width * 0.35)
-                cy1 = max(0, cy1 - height_expand_top)
-                cy2 = min(image_size, cy2 + height_expand_bottom)
-                cx1 = max(0, cx1 - width_expand)
-                cx2 = min(image_size, cx2 + width_expand)
+                target_width = int(total_width * 1.4)
+                target_height = int(total_height * 1.25)
+                target_width = min(target_width, image_size)
+                target_height = min(target_height, image_size)
 
-                target_size = (cx2 - cx1, cy2 - cy1)
-                resized_garment = _resize_image_np(garment_crop, target_size)
-                resized_mask = _resize_mask_np(garment_mask_crop, target_size)
+                resized_garment = _resize_image_np(garment_crop, (target_width, target_height))
+                resized_mask = _resize_mask_np(garment_mask_crop, (target_width, target_height))
 
-                # Expand the dress mask edge so the skirt can flare beyond the original shape.
-                for _ in range(3):
-                    resized_mask = np.logical_or(resized_mask, np.roll(resized_mask, 1, axis=0))
-                    resized_mask = np.logical_or(resized_mask, np.roll(resized_mask, -1, axis=0))
-                    resized_mask = np.logical_or(resized_mask, np.roll(resized_mask, 1, axis=1))
-                    resized_mask = np.logical_or(resized_mask, np.roll(resized_mask, -1, axis=1))
-
-                final_mask = resized_mask
-                final_mask_img = Image.fromarray((final_mask.astype(np.uint8) * 255))
-                final_mask_img = final_mask_img.filter(ImageFilter.GaussianBlur(radius=6))
+                # Soften the dress edges without flattening the quality.
+                final_mask_img = Image.fromarray((resized_mask.astype(np.uint8) * 255))
+                final_mask_img = final_mask_img.filter(ImageFilter.GaussianBlur(radius=3))
                 final_mask = np.array(final_mask_img).astype(np.float32) / 255.0
                 final_mask = np.clip(final_mask, 0.0, 1.0)
 
-                # Place the dress so the top sits slightly above the original clothing region.
-                resized_h, resized_w = resized_garment.shape[:2]
-                place_x = cx1 + max(0, (target_size[0] - resized_w) // 2)
-                place_y = max(0, cy1 - int(total_height * 0.12))
-                if place_x + resized_w > image_size:
-                    place_x = image_size - resized_w
-                if place_y + resized_h > image_size:
-                    place_y = image_size - resized_h
+                clothing_center_x = (cx1 + cx2) // 2
+                place_x = max(0, min(image_size - target_width, clothing_center_x - target_width // 2))
+                place_y = max(0, cy1 - int(total_height * 0.08))
+                if place_y + target_height > image_size:
+                    place_y = image_size - target_height
 
-                crop_person = removed[place_y:place_y + resized_h, place_x:place_x + resized_w]
+                crop_person = removed[place_y:place_y + target_height, place_x:place_x + target_width]
                 crop_out = (
                     crop_person * (1.0 - final_mask[..., None])
                     + resized_garment * final_mask[..., None]
                 )
                 out_np = removed.copy()
-                out_np[place_y:place_y + resized_h, place_x:place_x + resized_w] = crop_out
+                out_np[place_y:place_y + target_height, place_x:place_x + target_width] = crop_out
                 out = torch.from_numpy(out_np).permute(2, 0, 1)
                 save_image(out, output_path)
                 return
