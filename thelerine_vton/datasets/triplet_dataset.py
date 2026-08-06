@@ -177,7 +177,11 @@ class TripletDataset(Dataset):
         # -----------------------------------------
 
         garment_mask = build_clothing_mask(seg)      # [1,H,W]
-        person = make_agnostic(target, seg)          # agnostic person
+        # make_agnostic expects a batched person tensor [B,3,H,W]
+        person = make_agnostic(
+            target.unsqueeze(0),
+            seg.unsqueeze(0),
+        ).squeeze(0)
         garment = align_garment_to_body(
             garment.unsqueeze(0),
             seg.unsqueeze(0),
