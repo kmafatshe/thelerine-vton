@@ -176,7 +176,10 @@ class TripletDataset(Dataset):
         # Derived training inputs
         # -----------------------------------------
 
-        garment_mask = build_clothing_mask(seg)      # [1,H,W]
+        garment_mask = build_clothing_mask(seg)      # [B,1,H,W]
+        # collapse batch dimension so garment_mask shape matches cond (C,H,W)
+        if garment_mask.ndim == 4 and garment_mask.shape[0] == 1:
+            garment_mask = garment_mask.squeeze(0)   # [1,H,W]
         # make_agnostic expects a batched person tensor [B,3,H,W]
         person = make_agnostic(
             target.unsqueeze(0),
