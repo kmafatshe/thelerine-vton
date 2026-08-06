@@ -18,7 +18,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image
+from PIL import Image, ImageFilter
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
@@ -397,9 +397,11 @@ def overlay_person_garment(
         clothing_mask = build_clothing_mask(seg_tensor).squeeze(0).squeeze(0).bool().cpu().numpy()
 
         if clothing_mask.sum() > 0:
-            # Remove the original dress first by blanking the clothing region.
-            out_np[clothing_mask] = 0.5
+            # Remove the original dress from the person image.
+            removed = person_np.copy()
+            removed[clothing_mask] = 0.5
 
+            # Fit the green dress to the clothing bbox from segmentation.
             gy1, gx1, gy2, gx2 = _bbox_from_mask(garment_mask)
             cy1, cx1, cy2, cx2 = _bbox_from_mask(clothing_mask)
             if gy1 < gy2 and gx1 < gx2 and cy1 < cy2 and cx1 < cx2:
@@ -411,12 +413,19 @@ def overlay_person_garment(
 
                 clothing_region = clothing_mask[cy1:cy2, cx1:cx2]
                 final_mask = np.logical_and(resized_mask, clothing_region)
-                crop_person = out_np[cy1:cy2, cx1:cx2]
 
+                # Soften the edges of the placed dress with a small blur.
+                final_mask_img = Image.fromarray((final_mask.astype(np.uint8) * 255))
+                final_mask_img = final_mask_img.filter(ImageFilter.GaussianBlur(radius=3))
+                final_mask = np.array(final_mask_img).astype(np.float32) / 255.0
+                final_mask = np.clip(final_mask, 0.0, 1.0)
+
+                crop_person = removed[cy1:cy2, cx1:cx2]
                 crop_out = (
-                    crop_person * (1.0 - final_mask[..., None].astype(np.float32))
-                    + resized_garment * final_mask[..., None].astype(np.float32)
+                    crop_person * (1.0 - final_mask[..., None])
+                    + resized_garment * final_mask[..., None]
                 )
+                out_np = removed.copy()
                 out_np[cy1:cy2, cx1:cx2] = crop_out
                 out = torch.from_numpy(out_np).permute(2, 0, 1)
                 save_image(out, output_path)
