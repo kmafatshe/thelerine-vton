@@ -412,19 +412,30 @@ def overlay_person_garment(
                 total_height = cy2 - cy1
                 total_width = cx2 - cx1
                 height_expand_top = int(total_height * 0.08)
-                    height_expand_bottom = int(total_height * 0.25)
-                    width_expand = int(total_width * 0.25)
-                    cy1 = max(0, cy1 - height_expand_top)
-                    cy2 = min(image_size, cy2 + height_expand_bottom)
-                    cx1 = max(0, cx1 - width_expand)
-                    cx2 = min(image_size, cx2 + width_expand)
+                height_expand_bottom = int(total_height * 0.25)
+                width_expand = int(total_width * 0.25)
+                cy1 = max(0, cy1 - height_expand_top)
+                cy2 = min(image_size, cy2 + height_expand_bottom)
+                cx1 = max(0, cx1 - width_expand)
+                cx2 = min(image_size, cx2 + width_expand)
 
-                    target_size = (cx2 - cx1, cy2 - cy1)
-                    resized_garment = _resize_image_np(garment_crop, target_size)
-                    resized_mask = _resize_mask_np(garment_mask_crop, target_size)
+                target_size = (cx2 - cx1, cy2 - cy1)
+                resized_garment = _resize_image_np(garment_crop, target_size)
+                resized_mask = _resize_mask_np(garment_mask_crop, target_size)
 
-                    # Don't crop the dress to the original clothing silhouette.
-                    final_mask = resized_mask
+                # Don't crop the dress to the original clothing silhouette.
+                final_mask = resized_mask
+
+                # Soften the edges of the placed dress with a small blur.
+                final_mask_img = Image.fromarray((final_mask.astype(np.uint8) * 255))
+                final_mask_img = final_mask_img.filter(ImageFilter.GaussianBlur(radius=3))
+                final_mask = np.array(final_mask_img).astype(np.float32) / 255.0
+                final_mask = np.clip(final_mask, 0.0, 1.0)
+
+                crop_person = removed[cy1:cy2, cx1:cx2]
+                crop_out = (
+                    crop_person * (1.0 - final_mask[..., None])
+                    + resized_garment * final_mask[..., None]
                 )
                 out_np = removed.copy()
                 out_np[cy1:cy2, cx1:cx2] = crop_out
