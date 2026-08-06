@@ -47,16 +47,38 @@ def build_manifest(
             raise FileNotFoundError(f"Missing required directory: {directory}")
 
     entries = []
-    person_files = sorted(person_dir.glob("*"))
+    person_files = sorted(person_dir.rglob("*"))
+
+    def resolve_path(base_dir: Path, candidate: Path, filename: str) -> Path:
+        if candidate.exists():
+            return candidate
+        fallback = base_dir / filename
+        return fallback
 
     for person_path in person_files:
+        if not person_path.is_file():
+            continue
+
         if person_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}:
             continue
 
+        rel_path = person_path.relative_to(person_dir)
         stem = person_path.stem
-        garment_path = garment_dir / person_path.name
-        cond_path = cond_dir / f"{stem}.npy"
-        seg_path = seg_dir / f"{stem}.npy"
+        garment_path = resolve_path(
+            garment_dir,
+            garment_dir / rel_path,
+            person_path.name,
+        )
+        cond_path = resolve_path(
+            cond_dir,
+            cond_dir / rel_path.with_suffix(".npy"),
+            f"{person_path.name}.npy",
+        )
+        seg_path = resolve_path(
+            seg_dir,
+            seg_dir / rel_path.with_suffix(".npy"),
+            f"{person_path.name}.npy",
+        )
 
         if not garment_path.exists():
             raise FileNotFoundError(f"Missing garment image for {stem}: {garment_path}")

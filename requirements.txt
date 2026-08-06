@@ -4,8 +4,8 @@ torchvision==0.17.2
 torchaudio==2.2.2
 
 # Numerical
-numpy==1.26.4
-scipy==1.13.1
+numpy>=2.0,<2.6
+scipy>=1.14.1
 
 # Images
 opencv-python==4.11.0.86
