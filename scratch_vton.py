@@ -284,6 +284,13 @@ def save_inference_output(
     save_image(prediction.image, output_path, normalize=True, value_range=(-1, 1))
 
 
+def _bbox_from_mask(mask: np.ndarray) -> tuple[int, int, int, int]:
+    ys, xs = np.where(mask)
+    if ys.size == 0:
+        return 0, 0, mask.shape[0], mask.shape[1]
+    return int(ys.min()), int(xs.min()), int(ys.max()) + 1, int(xs.max()) + 1
+
+
 def _foreground_mask_from_garment(garment_np: np.ndarray) -> np.ndarray:
     # Determine the garment region using a color/saturation heuristic.
     # This preserves the actual garment shape rather than the source person clothing.
@@ -299,14 +306,12 @@ def _foreground_mask_from_garment(garment_np: np.ndarray) -> np.ndarray:
     brightness = maxc
 
     mask = (brightness > 0.08) & (saturation > 0.10)
-
-    # Prefer strongly colored pixels if the garment is saturated.
     mask = np.logical_or(mask, (saturation > 0.15) & (brightness > 0.05))
 
     if mask.sum() < 500:
         mask = (brightness > 0.05) & (saturation > 0.08)
 
-    # Keep only the largest connected region.
+    # Keep only the largest connected component.
     label = np.zeros_like(mask, dtype=np.int32)
     current_label = 0
     h, w = mask.shape
@@ -348,6 +353,18 @@ def _foreground_mask_from_garment(garment_np: np.ndarray) -> np.ndarray:
     return cleaned.astype(np.bool_)
 
 
+def _resize_image_np(image_np: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    image = Image.fromarray((image_np * 255).astype(np.uint8))
+    resized = np.array(image.resize(size, resample=Image.BILINEAR)).astype(np.float32) / 255.0
+    return resized
+
+
+def _resize_mask_np(mask: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    image = Image.fromarray((mask.astype(np.uint8) * 255))
+    resized = np.array(image.resize(size, resample=Image.NEAREST)).astype(np.uint8) > 0
+    return resized
+
+
 def overlay_person_garment(
     person_path: Path,
     garment_path: Path,
@@ -360,6 +377,9 @@ def overlay_person_garment(
 
     garment_np = np.array(garment).astype(np.float32) / 255.0
     garment_mask = _foreground_mask_from_garment(garment_np)
+
+    person_np = np.array(person).astype(np.float32) / 255.0
+    out_np = person_np.copy()
 
     if seg_path is not None and seg_path.exists():
         seg_arr = np.load(seg_path)
@@ -374,12 +394,35 @@ def overlay_person_garment(
             size=(image_size, image_size),
             mode="nearest",
         )
-        # Use a broad person silhouette mask rather than the original clothing mask.
-        person_mask = seg_tensor.squeeze(0).squeeze(0) != 0
-        person_mask = person_mask.bool().cpu().numpy()
-        garment_mask = np.logical_and(garment_mask, person_mask)
+        clothing_mask = build_clothing_mask(seg_tensor).squeeze(0).squeeze(0).bool().cpu().numpy()
 
-    person_np = np.array(person).astype(np.float32) / 255.0
+        if clothing_mask.sum() > 0:
+            # Remove the original dress first by blanking the clothing region.
+            out_np[clothing_mask] = 0.5
+
+            gy1, gx1, gy2, gx2 = _bbox_from_mask(garment_mask)
+            cy1, cx1, cy2, cx2 = _bbox_from_mask(clothing_mask)
+            if gy1 < gy2 and gx1 < gx2 and cy1 < cy2 and cx1 < cx2:
+                garment_crop = garment_np[gy1:gy2, gx1:gx2]
+                garment_mask_crop = garment_mask[gy1:gy2, gx1:gx2]
+                target_size = (cx2 - cx1, cy2 - cy1)
+                resized_garment = _resize_image_np(garment_crop, target_size)
+                resized_mask = _resize_mask_np(garment_mask_crop, target_size)
+
+                clothing_region = clothing_mask[cy1:cy2, cx1:cx2]
+                final_mask = np.logical_and(resized_mask, clothing_region)
+                crop_person = out_np[cy1:cy2, cx1:cx2]
+
+                crop_out = (
+                    crop_person * (1.0 - final_mask[..., None].astype(np.float32))
+                    + resized_garment * final_mask[..., None].astype(np.float32)
+                )
+                out_np[cy1:cy2, cx1:cx2] = crop_out
+                out = torch.from_numpy(out_np).permute(2, 0, 1)
+                save_image(out, output_path)
+                return
+
+    # Fallback: overlay garment shape directly when no valid segmentation or fit is available.
     out_np = person_np * (1.0 - garment_mask[..., None].astype(np.float32)) + garment_np * garment_mask[..., None].astype(np.float32)
     out = torch.from_numpy(out_np).permute(2, 0, 1)
     save_image(out, output_path)
