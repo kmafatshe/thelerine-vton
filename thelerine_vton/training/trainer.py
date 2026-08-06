@@ -49,27 +49,32 @@ class Trainer:
 
     def _move_batch(self, batch):
 
-        person = batch.person.to(
+        if isinstance(batch, dict):
+            get_item = batch.get
+        else:
+            get_item = lambda key: getattr(batch, key)
+
+        person = get_item("person").to(
             self.device,
             non_blocking=True,
         )
 
-        garment = batch.garment.to(
+        garment = get_item("garment").to(
             self.device,
             non_blocking=True,
         )
 
-        condition = batch.condition.to(
+        condition = get_item("condition").to(
             self.device,
             non_blocking=True,
         )
 
-        target = batch.target.to(
+        target = get_item("target").to(
             self.device,
             non_blocking=True,
         )
 
-        garment_mask = batch.garment_mask.to(
+        garment_mask = get_item("garment_mask").to(
             self.device,
             non_blocking=True,
         )

@@ -17,7 +17,6 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 from .manifest import load_manifest
-from .sample import Sample
 from thelerine_vton.preprocessing.agnostic import (
     build_clothing_mask,
     make_agnostic,
@@ -197,10 +196,10 @@ class TripletDataset(Dataset):
             dim=0,
         ).contiguous()
 
-        return Sample(
-            person=person.contiguous(),
-            garment=garment.contiguous(),
-            condition=condition,
-            target=target.contiguous(),
-            garment_mask=garment_mask.contiguous(),
-        )
+        return {
+            "person": person.contiguous(),
+            "garment": garment.contiguous(),
+            "condition": condition,
+            "target": target.contiguous(),
+            "garment_mask": garment_mask.contiguous(),
+        }
