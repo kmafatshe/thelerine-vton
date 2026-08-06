@@ -29,7 +29,7 @@ class Trainer:
 
         self.model = model
         self.optimizer = optimizer
-        self.loss_fn = loss_fn
+        self.loss_fn = loss_fn.to(device)
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
