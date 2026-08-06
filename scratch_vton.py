@@ -293,7 +293,9 @@ def _foreground_mask_from_garment(garment_np: np.ndarray) -> np.ndarray:
     maxc = np.maximum(np.maximum(r, g), b)
     minc = np.minimum(np.minimum(r, g), b)
     delta = maxc - minc
-    saturation = np.where(maxc > 0, delta / maxc, 0.0)
+    saturation = np.zeros_like(maxc)
+    nonzero = maxc > 0
+    saturation[nonzero] = delta[nonzero] / maxc[nonzero]
     brightness = maxc
 
     mask = (brightness > 0.08) & (saturation > 0.10)
