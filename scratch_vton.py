@@ -283,6 +283,42 @@ def save_inference_output(
     save_image(prediction.image, output_path, normalize=True, value_range=(-1, 1))
 
 
+def overlay_person_garment(
+    person_path: Path,
+    garment_path: Path,
+    output_path: Path,
+    image_size: int = 256,
+    seg_path: Optional[Path] = None,
+) -> None:
+    person = Image.open(person_path).convert("RGB").resize((image_size, image_size), Image.BILINEAR)
+    garment = Image.open(garment_path).convert("RGB").resize((image_size, image_size), Image.BILINEAR)
+
+    if seg_path is not None and seg_path.exists():
+        seg_arr = np.load(seg_path)
+        seg_tensor = torch.from_numpy(seg_arr).float()
+        if seg_tensor.ndim == 2:
+            seg_tensor = seg_tensor.unsqueeze(0)
+        elif seg_tensor.ndim == 3 and seg_tensor.shape[-1] == 1:
+            seg_tensor = seg_tensor.permute(2, 0, 1)
+        seg_tensor = seg_tensor.unsqueeze(0)
+        seg_tensor = torch.nn.functional.interpolate(
+            seg_tensor,
+            size=(image_size, image_size),
+            mode="nearest",
+        )
+        mask = build_clothing_mask(seg_tensor)
+        mask = mask.squeeze(0).squeeze(0).bool().cpu().numpy()
+    else:
+        mask = np.zeros((image_size, image_size), dtype=bool)
+        mask[image_size // 4 : image_size * 3 // 4, image_size // 5 : image_size * 4 // 5] = True
+
+    person_np = np.array(person).astype(np.float32) / 255.0
+    garment_np = np.array(garment).astype(np.float32) / 255.0
+    out_np = person_np * (1.0 - mask[..., None].astype(np.float32)) + garment_np * mask[..., None].astype(np.float32)
+    out = torch.from_numpy(out_np).permute(2, 0, 1)
+    save_image(out, output_path)
+
+
 def train(args: argparse.Namespace) -> None:
     device = get_device()
     dataset = SmallVTONDataset(
@@ -335,6 +371,17 @@ def train(args: argparse.Namespace) -> None:
 
 
 def infer(args: argparse.Namespace) -> None:
+    if args.overlay:
+        overlay_person_garment(
+            Path(args.person),
+            Path(args.garment),
+            Path(args.output),
+            image_size=args.image_size,
+            seg_path=Path(args.seg) if args.seg else None,
+        )
+        print(f"Saved overlay fallback output to {args.output}")
+        return
+
     device = get_device()
     model = VTONGenerator(base_channels=args.base_channels).to(device)
     checkpoint = torch.load(args.checkpoint, map_location=device)
@@ -384,6 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     infer_parser.add_argument("--base-channels", type=int, default=32)
     infer_parser.add_argument("--seg", default=None)
     infer_parser.add_argument("--cond", default=None)
+    infer_parser.add_argument("--overlay", action="store_true", help="Use simple overlay fallback instead of the model")
 
     return parser
 
