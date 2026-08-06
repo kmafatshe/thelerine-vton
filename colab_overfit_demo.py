@@ -20,7 +20,7 @@ from thelerine_vton.datasets.triplet_dataset import TripletDataset
 from thelerine_vton.models.vton_generator import VTONGenerator
 from thelerine_vton.training.losses import TotalLoss
 from thelerine_vton.training.trainer import Trainer
-from thelerine_vton.utils.seed import set_seed
+from thelerine_vton.utils.seed import seed_everything
 
 
 def get_device():
@@ -58,7 +58,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    set_seed(args.seed)
+    seed_everything(args.seed)
     device = get_device()
     print(f"Using device: {device}")
 
