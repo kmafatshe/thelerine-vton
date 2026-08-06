@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
@@ -250,9 +251,9 @@ def save_inference_output(
         elif cond_tensor.shape[0] == 3:
             cond_tensor = cond_tensor.repeat(2, 1, 1)
         cond_tensor = cond_tensor[:6]
-        cond_tensor = cond_tensor.unsqueeze(0).to(device)
+        cond_tensor = cond_tensor.unsqueeze(0)
     else:
-        cond_tensor = torch.zeros(1, 6, image_size, image_size, device=device)
+        cond_tensor = torch.zeros(1, 6, image_size, image_size)
 
     if seg_path is not None:
         seg = np.load(seg_path)
@@ -261,9 +262,15 @@ def save_inference_output(
             seg_tensor = seg_tensor.unsqueeze(0)
         elif seg_tensor.ndim == 3 and seg_tensor.shape[-1] != seg_tensor.shape[0]:
             seg_tensor = seg_tensor.permute(2, 0, 1)
-        seg_tensor = seg_tensor.unsqueeze(0).to(device)
+        seg_tensor = seg_tensor.unsqueeze(0)
     else:
-        seg_tensor = torch.ones(1, 1, image_size, image_size, device=device)
+        seg_tensor = torch.ones(1, 1, image_size, image_size)
+
+    cond_tensor = F.interpolate(cond_tensor, size=(image_size, image_size), mode="bilinear", align_corners=False)
+    seg_tensor = F.interpolate(seg_tensor, size=(image_size, image_size), mode="nearest")
+
+    cond_tensor = cond_tensor.to(device)
+    seg_tensor = seg_tensor.to(device)
 
     garment_mask = build_clothing_mask(seg_tensor)
     condition = torch.cat([cond_tensor.squeeze(0), garment_mask.squeeze(0)], dim=0).unsqueeze(0)
