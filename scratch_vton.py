@@ -426,21 +426,23 @@ def overlay_person_garment(
                 resized_garment = _resize_image_np(garment_crop, (target_width, target_height))
                 resized_mask = _resize_mask_np(garment_mask_crop, (target_width, target_height))
 
-                # Allow the green dress to occupy the full expanded clothing area.
                 clothing_mask_expanded = _expand_mask(clothing_mask, iterations=4)
-                clothing_region = clothing_mask_expanded[cy1:cy2, cx1:cx2]
+                clothing_center_x = (cx1 + cx2) // 2
+                place_x = max(0, min(image_size - target_width, clothing_center_x - target_width // 2))
+                place_y = max(0, cy1 - int(total_height * 0.12))
+                if place_y + target_height > image_size:
+                    place_y = image_size - target_height
+
+                clothing_region = clothing_mask_expanded[place_y:place_y + target_height, place_x:place_x + target_width]
+                if clothing_region.shape != resized_mask.shape:
+                    # Fallback to the dress mask if region size differs unexpectedly.
+                    clothing_region = np.zeros_like(resized_mask)
                 resized_mask = np.logical_or(resized_mask, clothing_region)
 
                 final_mask_img = Image.fromarray((resized_mask.astype(np.uint8) * 255))
                 final_mask_img = final_mask_img.filter(ImageFilter.GaussianBlur(radius=4))
                 final_mask = np.array(final_mask_img).astype(np.float32) / 255.0
                 final_mask = np.clip(final_mask, 0.0, 1.0)
-
-                clothing_center_x = (cx1 + cx2) // 2
-                place_x = max(0, min(image_size - target_width, clothing_center_x - target_width // 2))
-                place_y = max(0, cy1 - int(total_height * 0.12))
-                if place_y + target_height > image_size:
-                    place_y = image_size - target_height
 
                 crop_person = removed[place_y:place_y + target_height, place_x:place_x + target_width]
                 crop_out = (
