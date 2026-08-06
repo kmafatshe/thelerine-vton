@@ -12,9 +12,6 @@ from PIL import Image
 from torchvision.utils import save_image
 
 from thelerine_vton.models.vton_generator import VTONGenerator
-from thelerine_vton.preprocessing.inference_preprocessor import (
-    InferencePreprocessor,
-)
 from thelerine_vton.datasets.transforms import ImageTransform
 
 
@@ -97,18 +94,20 @@ def main():
 
     garment_tensor = transform(garment).unsqueeze(0).to(device)
 
-    preprocessor = InferencePreprocessor()
-
-    condition = preprocessor(person)
-
-    condition = condition.unsqueeze(0).to(device)
+    # Placeholder condition tensor: zeros with 7 channels.
+    # This is compatible with the model input shape, but does not
+    # provide real DensePose/segmentation conditioning.
+    condition = torch.zeros(
+        1,
+        7,
+        256,
+        256,
+        device=device,
+    )
 
     model = load_model(
-
         Path(args.checkpoint),
-
         device,
-
     )
 
     with torch.no_grad():
