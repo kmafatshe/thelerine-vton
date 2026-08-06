@@ -215,9 +215,9 @@ def save_sample_output(
 ) -> None:
     model.eval()
     with torch.no_grad():
-        person = batch["person"].to(device)
-        garment = batch["garment"].to(device)
-        condition = batch["condition"].to(device)
+        person = batch["person"].unsqueeze(0).to(device)
+        garment = batch["garment"].unsqueeze(0).to(device)
+        condition = batch["condition"].unsqueeze(0).to(device)
         prediction = model(person, garment, condition)
 
     save_image(
