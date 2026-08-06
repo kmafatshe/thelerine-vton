@@ -410,9 +410,9 @@ def overlay_person_garment(
 
                 total_height = cy2 - cy1
                 total_width = cx2 - cx1
-                height_expand_top = int(total_height * 0.10)
-                height_expand_bottom = int(total_height * 0.30)
-                width_expand = int(total_width * 0.30)
+                height_expand_top = int(total_height * 0.15)
+                height_expand_bottom = int(total_height * 0.45)
+                width_expand = int(total_width * 0.35)
                 cy1 = max(0, cy1 - height_expand_top)
                 cy2 = min(image_size, cy2 + height_expand_bottom)
                 cx1 = max(0, cx1 - width_expand)
@@ -422,17 +422,23 @@ def overlay_person_garment(
                 resized_garment = _resize_image_np(garment_crop, target_size)
                 resized_mask = _resize_mask_np(garment_mask_crop, target_size)
 
-                # Preserve the garment shape while allowing extra flare at the bottom.
+                # Expand the dress mask edge so the skirt can flare beyond the original shape.
+                for _ in range(3):
+                    resized_mask = np.logical_or(resized_mask, np.roll(resized_mask, 1, axis=0))
+                    resized_mask = np.logical_or(resized_mask, np.roll(resized_mask, -1, axis=0))
+                    resized_mask = np.logical_or(resized_mask, np.roll(resized_mask, 1, axis=1))
+                    resized_mask = np.logical_or(resized_mask, np.roll(resized_mask, -1, axis=1))
+
                 final_mask = resized_mask
                 final_mask_img = Image.fromarray((final_mask.astype(np.uint8) * 255))
-                final_mask_img = final_mask_img.filter(ImageFilter.GaussianBlur(radius=5))
+                final_mask_img = final_mask_img.filter(ImageFilter.GaussianBlur(radius=6))
                 final_mask = np.array(final_mask_img).astype(np.float32) / 255.0
                 final_mask = np.clip(final_mask, 0.0, 1.0)
 
-                # Center the resized dress and raise it slightly for a better torso fit.
+                # Place the dress so the top sits slightly above the original clothing region.
                 resized_h, resized_w = resized_garment.shape[:2]
                 place_x = cx1 + max(0, (target_size[0] - resized_w) // 2)
-                place_y = max(0, cy1 - int(total_height * 0.05))
+                place_y = max(0, cy1 - int(total_height * 0.12))
                 if place_x + resized_w > image_size:
                     place_x = image_size - resized_w
                 if place_y + resized_h > image_size:
