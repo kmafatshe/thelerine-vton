@@ -407,6 +407,15 @@ def overlay_person_garment(
             if gy1 < gy2 and gx1 < gx2 and cy1 < cy2 and cx1 < cx2:
                 garment_crop = garment_np[gy1:gy2, gx1:gx2]
                 garment_mask_crop = garment_mask[gy1:gy2, gx1:gx2]
+
+                # Grow the target clothing box so the dress covers more of the torso.
+                height_expand = int((cy2 - cy1) * 0.12)
+                width_expand = int((cx2 - cx1) * 0.10)
+                cy1 = max(0, cy1 - height_expand)
+                cy2 = min(image_size, cy2 + height_expand)
+                cx1 = max(0, cx1 - width_expand)
+                cx2 = min(image_size, cx2 + width_expand)
+
                 target_size = (cx2 - cx1, cy2 - cy1)
                 resized_garment = _resize_image_np(garment_crop, target_size)
                 resized_mask = _resize_mask_np(garment_mask_crop, target_size)
