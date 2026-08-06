@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -284,25 +285,65 @@ def save_inference_output(
 
 
 def _foreground_mask_from_garment(garment_np: np.ndarray) -> np.ndarray:
-    # Determine the garment region using a simple foreground heuristic.
+    # Determine the garment region using a color/saturation heuristic.
     # This preserves the actual garment shape rather than the source person clothing.
-    brightness = garment_np.max(axis=2)
-    saturation = garment_np.std(axis=2)
+    r = garment_np[..., 0]
+    g = garment_np[..., 1]
+    b = garment_np[..., 2]
+    maxc = np.maximum(np.maximum(r, g), b)
+    minc = np.minimum(np.minimum(r, g), b)
+    delta = maxc - minc
+    saturation = np.where(maxc > 0, delta / maxc, 0.0)
+    brightness = maxc
 
-    mask = (brightness > 0.15) & (saturation > 0.05)
+    mask = (brightness > 0.08) & (saturation > 0.10)
 
-    # Expand the mask if it is too small.
+    # Prefer strongly colored pixels if the garment is saturated.
+    mask = np.logical_or(mask, (saturation > 0.15) & (brightness > 0.05))
+
     if mask.sum() < 500:
-        mask = brightness > 0.10
+        mask = (brightness > 0.05) & (saturation > 0.08)
 
-    # Fill small holes by a simple row/column majority rule.
+    # Keep only the largest connected region.
+    label = np.zeros_like(mask, dtype=np.int32)
+    current_label = 0
+    h, w = mask.shape
+    largest_label = 0
+    largest_size = 0
+    for y in range(h):
+        for x in range(w):
+            if not mask[y, x] or label[y, x] != 0:
+                continue
+            current_label += 1
+            queue = deque([(y, x)])
+            label[y, x] = current_label
+            size = 0
+            while queue:
+                yy, xx = queue.popleft()
+                size += 1
+                for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    ny, nx = yy + dy, xx + dx
+                    if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and label[ny, nx] == 0:
+                        label[ny, nx] = current_label
+                        queue.append((ny, nx))
+            if size > largest_size:
+                largest_size = size
+                largest_label = current_label
+
+    cleaned = label == largest_label
+
+    # Close small gaps in the shape.
     for _ in range(2):
-        mask = np.logical_or(mask, np.roll(mask, 1, axis=0))
-        mask = np.logical_or(mask, np.roll(mask, -1, axis=0))
-        mask = np.logical_or(mask, np.roll(mask, 1, axis=1))
-        mask = np.logical_or(mask, np.roll(mask, -1, axis=1))
+        dilated = np.logical_or(cleaned, np.roll(cleaned, 1, axis=0))
+        dilated = np.logical_or(dilated, np.roll(dilated, -1, axis=0))
+        dilated = np.logical_or(dilated, np.roll(dilated, 1, axis=1))
+        dilated = np.logical_or(dilated, np.roll(dilated, -1, axis=1))
+        cleaned = np.logical_and(
+            np.logical_and(dilated, np.roll(dilated, 1, axis=0)),
+            np.logical_and(np.roll(dilated, -1, axis=0), np.logical_and(np.roll(dilated, 1, axis=1), np.roll(dilated, -1, axis=1))),
+        )
 
-    return mask.astype(np.bool_)
+    return cleaned.astype(np.bool_)
 
 
 def overlay_person_garment(
@@ -331,9 +372,9 @@ def overlay_person_garment(
             size=(image_size, image_size),
             mode="nearest",
         )
-        person_silhouette = build_clothing_mask(seg_tensor)
-        person_mask = person_silhouette.squeeze(0).squeeze(0).bool().cpu().numpy()
-        # Restrict garment shape to the person silhouette to prevent overlay spill.
+        # Use a broad person silhouette mask rather than the original clothing mask.
+        person_mask = seg_tensor.squeeze(0).squeeze(0) != 0
+        person_mask = person_mask.bool().cpu().numpy()
         garment_mask = np.logical_and(garment_mask, person_mask)
 
     person_np = np.array(person).astype(np.float32) / 255.0
